@@ -278,7 +278,7 @@ test("cancel: only a queued job; a running one is the owner's to stop", async ()
   const c2 = await api("POST", `/jobs/${held.json.id}/cancel`);
   assert.deepEqual([c2.status, c2.json.error.code], [409, "job_running"]);
   const stopped = await mock.control(`jobs/${held.json.id}/stop`, {});
-  assert.equal(stopped.status, "canceled");
+  assert.deepEqual([stopped.status, stopped.error.code], ["canceled", "stopped_by_owner"]);
 
   const d = await api("POST", "/messages", { body: { to: "Mom", text: "hi" } });
   const c3 = await api("POST", `/jobs/${d.json.id}/cancel`);
@@ -299,7 +299,7 @@ test("credits: charges show in /v1/usage, failures are free, an empty balance is
   await api("POST", "/messages", { body: { to: "Mom", text: "hi" } });
   const failed = await api("POST", "/messages", { body: { to: "Nobody In Contacts", text: "hi" } });
   assert.equal(failed.json.status, "failed");
-  assert.equal(failed.json.error.code, "recipient_not_found");
+  assert.equal(failed.json.error.code, "send_failed", "the code the real Mac writes");
   const u = await api("GET", "/usage");
   assert.equal(u.json.key.usage_usd, 0.05);
   assert.equal(u.json.plan.extra_usage_usd, 0.95);
@@ -415,4 +415,54 @@ test("tasks with output_schema come back with data of that shape", async () => {
   const bad = await api("POST", "/tasks", { body: { prompt: "x", output_schema: "json" } });
   assert.equal(bad.status, 400);
   assert.equal(bad.json.error.param, "output_schema");
+});
+
+// A starter that passes here must not fail in production, so the mock refuses
+// what production refuses.
+test("production's checks: steps as strings, a file without mime, a bad role, a missing text", async () => {
+  const png = Buffer.from("89504e470d0a1a0a0000000d49484452", "hex").toString("base64");
+  let r = await api("POST", "/computer/next-action", { body: { goal: "open Safari", screenshot: png, steps: ["clicked the dock"] } });
+  assert.deepEqual([r.status, r.json.error.code, r.json.error.param], [400, "invalid_steps", "steps"]);
+  r = await api("POST", "/computer/next-action", { body: { goal: "open Safari", screenshot: png, elements: ["Safari"] } });
+  assert.deepEqual([r.status, r.json.error.code], [400, "invalid_elements"]);
+  r = await api("POST", "/computer/next-action", { body: { goal: "open Safari", screenshot: "aGVsbG8gd29ybGQ=" } });
+  assert.deepEqual([r.status, r.json.error.code], [400, "invalid_screenshot"], "base64 that isn't an image");
+  r = await api("POST", "/computer/next-action", { body: { goal: "open Safari", screenshots: [png], steps: [{ type: "click", x: 1, y: 2 }] } });
+  assert.equal(r.status, 200, "screenshots works, and steps are objects");
+
+  r = await api("POST", "/messages", { body: { to: "Mom", text: "x", attachments: [{ name: "a.png", b64: png }] } });
+  assert.deepEqual([r.status, r.json.error.code, r.json.error.param], [400, "invalid_attachments", "attachments[0].mime"]);
+  r = await api("POST", "/messages", { body: { to: "Mom", attachments: [{ name: "a.png", mime: "image/png", b64: png }] } });
+  assert.deepEqual([r.status, r.json.error.param], [400, "text"], "text is required even with an attachment");
+
+  r = await api("POST", "/chat/completions", { body: { messages: [{ role: "human", content: "hi" }] } });
+  assert.deepEqual([r.status, r.json.error.code], [400, "invalid_role"]);
+  r = await api("POST", "/chat/completions", { body: { messages: [{ role: "user", content: [{ type: "image_url", image_url: { url: "https://x.example/a.png" } }] }] } });
+  assert.deepEqual([r.status, r.json.error.code], [400, "invalid_image"]);
+  r = await api("POST", "/chat/completions", { body: { messages: [{ role: "developer", content: "be brief" }, { role: "user", content: "hi" }] } });
+  assert.equal(r.status, 200, "developer is a role");
+
+  r = await api("POST", "/messages?wait=1.5", { body: { to: "Mom", text: "decimals are fine" } });
+  assert.equal(r.status, 200);
+  r = await api("GET", "/calls");
+  assert.deepEqual([r.status, r.json.error.code, r.headers.get("allow")], [405, "method_not_allowed", "POST"]);
+  assert.equal((await mock.state()).jobs.length, 1);
+});
+
+test("503 job_unverified: the job was made and still runs, so a client must not send again", async () => {
+  await mock.config({ unverify_jobs: 1 });
+  const r = await api("POST", "/messages", { body: { to: "Mom", text: "only once" } });
+  assert.deepEqual([r.status, r.json.error.code, r.headers.get("retry-after")], [503, "job_unverified", "2"]);
+  await eventually(async () => (await mock.state()).outbox.length === 1);
+  const s = await mock.state();
+  assert.equal(s.jobs.length, 1);
+  assert.equal(s.jobs[0].status, "done");
+  assert.equal((await api("POST", "/messages", { body: { to: "Mom", text: "next one answers" } })).status, 200);
+});
+
+test("503 billing_unverified on chat: the model ran and was charged", async () => {
+  await mock.config({ unverify_chat: 1 });
+  const r = await api("POST", "/chat/completions", { body: { messages: [{ role: "user", content: "hi" }] } });
+  assert.deepEqual([r.status, r.json.error.code], [503, "billing_unverified"]);
+  assert.equal((await mock.state()).charges.length, 1);
 });

@@ -82,7 +82,7 @@ test("a key without messages.read is told which scope is missing", async () => {
 test("an unknown chat and an offline Mac both explain themselves", async () => {
   let r = await run(["--chat", "Not A Chat"]);
   assert.equal(r.code, 1);
-  assert.match(r.stderr, /couldn't find a chat called "Not A Chat"/);
+  assert.match(r.stderr, /Couldn't find a chat matching "Not A Chat"/);
   await mock.config({ mac: "offline" });
   r = await run(["--chat", "Hack Squad"]);
   assert.equal(r.code, 1);

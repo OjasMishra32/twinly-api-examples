@@ -116,3 +116,14 @@ test("no key, no prompt", async () => {
   r = await run([]);
   assert.equal(r.code, 2);
 });
+
+test("503 job_unverified is never retried: the task may still run", async () => {
+  await mock.config({ unverify_jobs: 1 });
+  const r = await run(["Book the table"]);
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /couldn't confirm this job was created/);
+  assert.match(r.stderr, /Don't send it again yet/);
+  const s = await mock.state();
+  assert.equal(s.jobs.length, 1, "one POST, no retry");
+  assert.equal(s.keys[0].requests, 1);
+});

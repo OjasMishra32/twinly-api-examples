@@ -17,7 +17,9 @@ newer, standard library only.
 
 1. **Settings ▸ Developer API ▸ Create a key**, with the `images` and
    `messages.send` scopes.
-2. Keep Twinly running on your Mac (it does the texting).
+2. Keep Twinly running on your Mac (it does the texting), with Messages
+   signed in, and Full Disk Access and Automation for Messages granted (the
+   **Access** screen's **Set everything up** does both).
 3. `cp .env.example .env` and paste your key in.
 
 The picture goes out attached right in the request, as

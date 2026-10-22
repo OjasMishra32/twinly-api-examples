@@ -9,13 +9,15 @@
 #
 #   OWN_NUMBER="+13525550100" ./smoke-live.sh
 #   OWN_NUMBER=... TWINLY_WEBHOOK_SECRET=... ./smoke-live.sh
-#         also runs the bot (webhook URL http://127.0.0.1:$BOT_PORT/twinly/webhook + "weather" command set in the app);
+#         also runs the bot (webhook URL http://127.0.0.1:$BOT_PORT/twinly/webhook + "weather" command set in the app,
+#         and Settings > Messages > "@twinly in Messages" on, with Full Disk Access);
 #         you text the command yourself, since texts the API sends never trigger @twinly
 #   OWN_NUMBER=... ALLOW_CALL=1 ./smoke-live.sh
 #         also places one short call to your own phone
 #
 # The key comes from TWINLY_API_KEY, or you're asked for it (typing is hidden).
-# Your Twinly must be running on your Mac, signed in, with Developer API on.
+# Your Twinly must be running on your Mac, signed in, with the Terms accepted and
+# Settings > Developer API > "Let keys text, call and run tasks as you" on.
 #
 # Rough cost: a task (2 + model), a chat read (0.2) and a summary, a voice
 # note (1), a picture (0.5), 2 texts (0.5 each), and 3 per call minute.

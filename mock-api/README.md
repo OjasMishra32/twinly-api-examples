@@ -47,7 +47,8 @@ TWINLY_API_KEY=twk_live_MockKeyForTwinlyExamplesNotARealKey00000000
 - You are **Alex Rivera**, `+15555550100`.
 - Contacts: `Mom` (+15555550101), `Sam Lee`, `Priya Shah`, `Diego Ortiz`,
   `Bella's Bistro` (+15555550199). Any phone number or email works too; an
-  unknown name fails the job with `recipient_not_found`.
+  unknown name fails the job (`send_failed` for a text, `read_failed` for a
+  read, `call_failed` for a call), with the reason in `error.message`.
 - Chats: `Hack Squad` (id `chat493021`, a group with 8 messages), your chat
   with Mom (`chat100001`) and your own note-to-self chat (`chat100000`).
 - Results are fixed: every call has the same polite 6-line transcript built
@@ -63,6 +64,7 @@ Plain JSON over HTTP, no key needed (it only listens on 127.0.0.1):
 |---|---|
 | `GET /_mock/state` | jobs, the outbox (every message "sent", with each attachment's size and SHA-256), calls, chat requests, webhook deliveries with each attempt, charges, balance |
 | `POST /_mock/config` | change any setting, for example `{"mac": "offline"}`, `{"balance_credits": 0}`, `{"hold": ["calls.place"]}`, `{"webhook_url": "http://127.0.0.1:8787/twinly/webhook"}`, `{"chat_reply": "fixed text"}`, `{"queue_timeout_ms": 1000}` |
+| | `{"unverify_jobs": 1}`: the next job POST makes the job (it still runs) but answers `503 job_unverified`, as production can (add `"unverify_kind": "messages.send"` to pick the kind). `{"unverify_chat": 1}`: the next chat runs and is charged, then answers `503 billing_unverified`. Use these to check your code never sends twice. |
 | `POST /_mock/reset` | back to a fresh start |
 | `POST /_mock/jobs/<id>/decide` | `{"approve": true}` or `false`, for a `needs_approval` job |
 | `POST /_mock/jobs/<id>/stop` | the owner pressing Stop in Twinly: a running or held job becomes `canceled` |
@@ -76,10 +78,11 @@ free port and wrap these controls. Every example's test uses them.
 
 ## How it reads the contract
 
-The mock follows `docs/developer-api/SPEC-v2.md` and matches the finished
-server (branch `api-v2/server`) on status codes, error codes and limits. Where
-the contract leaves a choice open, this is the choice the mock makes (and the
-examples rely on nothing beyond it):
+The mock follows `docs/developer-api/README.md` and `openapi.yaml`, and
+matches production's `twinly-api` function and the Mac's job runner on status
+codes, error codes and limits. Anything production refuses, the mock refuses
+too, so a starter whose tests pass here doesn't fail on the real API for a
+request it got wrong. The details:
 
 - **Errors** use v1's shape: `{"error": {"message", "type", "code", "param"}}`,
   with `type` from the status (`authentication_error`, `insufficient_quota`,
@@ -104,14 +107,26 @@ examples rely on nothing beyond it):
 - **`result` and `error`** are always present, `null` when empty.
 - **Validation errors** are 400 with `param` naming the field:
   `invalid_recipient` (not exactly one of `to`/`chat`, or `chat`/`with`),
-  `invalid_attachments`, `attachment_too_large`, `invalid_prompt` (images),
-  and `invalid_parameter` for the rest. Limits: `to` 128 characters, `chat`
-  256, message `text` 4000 (it may be empty when there's an attachment),
-  `goal` 2000, `say` 1000, spoken `text` 600, task `prompt` 4000.
-- **Job errors the spec doesn't name** (made up here, so the Mac piece can
-  pick its own): `recipient_not_found`, `chat_not_found`, `declined` (the
-  owner said no to a held step), `attachment_unavailable`,
-  `attachment_too_large`.
+  `invalid_attachments` (including an inline file missing `name`, `mime` or
+  `b64`), `attachment_too_large`, `invalid_prompt` (images), and
+  `invalid_parameter` for the rest. Message `text` is always required, even
+  with an attachment (it may then be `""`). Limits: `to` 128 characters,
+  `chat` 256, message `text` 4000, `goal` 2000, `say` 1000, spoken `text` 600,
+  task `prompt` 4000.
+- **Cloud checks:** chat roles must be `system`, `developer`, `user`,
+  `assistant` or `tool` (`invalid_role`); images must be base64 data URLs
+  (`invalid_image`), at most 8. Next-action needs a real PNG, JPEG or WebP
+  screenshot (`invalid_screenshot`), and `steps` and `elements` must be arrays
+  of objects (`invalid_steps`, `invalid_elements`): a list of strings is
+  refused, as in production.
+- **Wrong method** on a real path (`GET /v1/calls`) is `405
+  method_not_allowed` with an `Allow` header.
+- **Job errors** use the codes the real Mac writes: `send_failed`,
+  `read_failed`, `call_failed` (the message says why), `attachment_failed`,
+  `declined` (the owner said no to a held step), `stopped_by_owner` (the owner
+  pressed Stop), `canceled` (canceled through the API), `timeout`,
+  `twinly_offline` and `queue_timeout`. The full list is in the guide's "Job
+  error codes".
 - **Expiry:** a queued job expires as `twinly_offline` when it's over 120 s
   old and the Mac's heartbeat is stale. While the Mac is up, a job may wait
   in line (behind a call, say) for up to 30 minutes, then expires as

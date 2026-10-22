@@ -18,8 +18,16 @@ packages, one small file per job (the server, the signature check, the weather).
 1. **Key with the bots scope.** In the Twinly Mac app: **Settings ▸ Developer
    API ▸ Create a key**, and leave `bots` ticked. The bot itself never sends
    the key anywhere; Twinly only delivers bot commands while one of your keys
-   allows `bots`.
-2. **Start the bot.**
+   allows `bots`. In the same section, keep **Let keys text, call and run
+   tasks as you** on (the **Jobs on this Mac** card); with it off, Twinly
+   sends no events at all.
+2. **Turn on @twinly.** Bot commands ride on Twinly's @twinly watcher, so they
+   only fire while **@twinly in Messages** is on, in **Settings ▸ Messages**
+   (it's off on a fresh install), and Twinly has **Full Disk Access** (System
+   Settings ▸ Privacy & Security ▸ Full Disk Access; restart Twinly after you
+   grant it). Messages has to be signed in on this Mac. If something is
+   missing, the @twinly switch shows a warning line saying what.
+3. **Start the bot.**
 
    ```bash
    cp .env.example .env
@@ -27,15 +35,24 @@ packages, one small file per job (the server, the signature check, the weather).
    # Bot listening on http://127.0.0.1:8787/twinly/webhook
    ```
 
-3. **Point Twinly at it.** Your own Mac sends the webhook, so a bot running
-   on the same Mac needs no tunnel. In **Settings ▸ Developer API ▸ Webhooks**:
-   - Webhook URL: `http://127.0.0.1:8787/twinly/webhook` (plain http is
-     allowed for this Mac only)
+4. **Point Twinly at it.** Your own Mac sends the webhook, so a bot running
+   on the same Mac needs no tunnel. In **Settings ▸ Developer API**:
+   - **Webhook** card: URL `http://127.0.0.1:8787/twinly/webhook` (plain http
+     is allowed for this Mac only), then **Save**.
    - **Show secret**, paste it into `.env` as `TWINLY_WEBHOOK_SECRET`, and
      restart `node bot.js`.
-   - **Bot commands**: add `weather`.
-   - **Send test event**: the bot prints the event it got.
-4. **Try it.** In any chat, text `@twinly weather Gainesville`.
+   - **Bot commands** card: add `weather`.
+   - **Send test event**: the bot prints the event it got. (The test goes out
+     even when the switch in step 1 is off, so it proves the URL and secret,
+     not the rest.)
+5. **Try it.** In any chat, type `@twinly weather Gainesville` yourself, in
+   Messages on the Mac or your phone. A text your code sends through
+   `POST /v1/messages` never triggers @twinly.
+
+**The bot never answers?** Check, in order: @twinly in Messages is on and
+shows no warning; Twinly has Full Disk Access; **Let keys text, call and run
+tasks as you** is on; a live key still has `bots`; the webhook URL is saved
+and **Send test event** reaches the bot; the bot answers within 10 seconds.
 
 **Bot running somewhere else** (a server, a teammate's laptop)? Give it a
 public https address and use that as the webhook URL. A free quick tunnel

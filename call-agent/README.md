@@ -24,10 +24,24 @@ library only (no `pip install`).
 
 ## Setup (5 minutes)
 
-1. Calling has to work in your Twinly app first: your voice cloned and phone
-   calling set up (**Voice** and **Phone** in the app). Make one test call
-   from the app if you never have.
-2. **Settings ▸ Developer API ▸ Create a key**, with the `calls` scope.
+1. Calling has to work in your Twinly app first. On your Mac you need all of:
+   - a **Google Voice** account (US numbers only), signed in at
+     voice.google.com inside **Google Chrome**, with calling turned on.
+     Twinly dials from Chrome, so another browser doesn't count.
+   - **BlackHole 2ch**, the free audio driver that carries your twin's voice
+     into the call. The **Voice** screen's **Before your twin can call** card
+     installs it.
+   - **Screen Recording** for Twinly (that's how it hears the other side).
+     Grant it on the **Access** screen; macOS applies it after Twinly restarts.
+   - **Your voice**: the **Voice** screen, record your clips, then **Build my
+     clone**.
+   - Chrome's **View ▸ Developer ▸ Allow JavaScript from Apple Events**, on.
+
+   Make one test call from the app if you never have. If a piece is missing,
+   the job fails with `call_failed` before anything is dialed, and the message
+   names the piece.
+2. **Settings ▸ Developer API ▸ Create a key**, with the `calls` scope. Keep
+   **Let keys text, call and run tasks as you** on in the same section.
 3. Keep Twinly running on your Mac. The call goes out from there, under your
    approval mode: if Twinly asks before calling, the script waits for your OK.
 4. `cp .env.example .env` and paste your key in.
@@ -40,7 +54,9 @@ python3 call_agent.py --to "Mom" --goal "Wish her happy birthday" --say "Hi Mom!
 ```
 
 `--to` is a phone number or a name from your contacts. `--say` sets the first
-line (otherwise your twin opens from the goal). Ctrl-C cancels a call that
+line (otherwise your twin opens from the goal); only its first sentence is
+spoken as the opener, and the rest is added to the goal (up to 1000
+characters in all). Ctrl-C cancels a call that
 hasn't started yet; once it's under way, end it in Twinly on your Mac.
 
 Please be decent with it: call people and businesses who'd be fine getting a

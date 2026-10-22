@@ -15,7 +15,11 @@ with the clip as an attachment. Python 3.9 or newer, standard library only.
 
 ## Setup (5 minutes)
 
-1. Clone your voice in the Twinly app first (**Voice**), if you haven't.
+1. Clone your voice in the Twinly app first, if you haven't: the **Voice**
+   screen, record your clips, then **Build my clone** (an Apple silicon Mac).
+   Without it the job fails with `voice_not_set_up`. Texts also need Messages
+   signed in, plus Full Disk Access and Automation for Messages (the
+   **Access** screen's **Set everything up** grants both).
 2. **Settings ▸ Developer API ▸ Create a key**, with the `voice` and
    `messages.send` scopes.
 3. Keep Twinly running on your Mac.

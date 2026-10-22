@@ -15,6 +15,10 @@ import urllib.request
 
 DEFAULT_BASE = "https://advktwnedlgnhswpxokg.supabase.co/functions/v1/twinly-api/v1"
 FINISHED = {"done", "failed", "canceled", "expired"}
+# A POST answered with one of these may already have done its work: the job
+# was made (and may still send a text or place a call), or the model ran and
+# was charged. Retrying could do it twice, so these are never retried.
+NOT_SAFE_TO_RETRY = {"job_unverified", "billing_record_failed", "billing_unverified"}
 
 
 class TwinlyError(Exception):
@@ -61,7 +65,9 @@ def call(method, path, body=None):
                 err = {}
             code = err.get("code") or "http_error"
             # Too fast, or Twinly busy for a moment: wait as told and try again.
-            if attempt < 3 and (e.code == 503 or (e.code == 429 and code == "rate_limited")):
+            # Never for a POST whose work may already have happened.
+            safe = method == "GET" or code not in NOT_SAFE_TO_RETRY
+            if attempt < 3 and safe and (e.code == 503 or (e.code == 429 and code == "rate_limited")):
                 time.sleep(float(e.headers.get("Retry-After") or 2))
                 continue
             raise TwinlyError(e.code, code, err.get("message") or "HTTP %d" % e.code)
@@ -94,9 +100,13 @@ def finished(job):
 
 
 HINTS = {
-    "twinly_offline": "Open Twinly on your Mac, sign in, and keep Settings > Developer API on.",
+    "twinly_offline": ("Open Twinly on your Mac, sign in, accept the Terms if it asks, and keep "
+                       "Settings > Developer API > \"Let keys text, call and run tasks as you\" on."),
     "insufficient_usage": "Redeem a code in Twinly > Settings > Developer API, or add extra usage on Account.",
     "invalid_api_key": "Check TWINLY_API_KEY in .env.",
+    "job_unverified": ("It may still run. Don't send it again yet: wait a minute, then check Twinly's task "
+                       "list (or Messages, for a text)."),
+    "voice_not_set_up": "Record your voice on Twinly's Voice screen, then Build my clone.",
 }
 
 

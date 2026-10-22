@@ -18,7 +18,7 @@ const HOST = process.env.HOST ?? "127.0.0.1";
 const PATH = "/twinly/webhook";
 
 if (!SECRET) {
-  console.error("Set TWINLY_WEBHOOK_SECRET in .env (Twinly ▸ Settings ▸ Developer API ▸ Webhooks ▸ Show secret).");
+  console.error("Set TWINLY_WEBHOOK_SECRET in .env (Twinly ▸ Settings ▸ Developer API ▸ Webhook ▸ Show secret).");
   process.exit(1);
 }
 

@@ -11,7 +11,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SCRIPT = os.path.join(HERE, "..", "postcard.py")
 MOCK_DIR = os.path.join(HERE, "..", "..", "mock-api")
 sys.path.insert(0, MOCK_DIR)
-from testkit import Mock  # noqa: E402
+from testkit import Mock, eventually  # noqa: E402
 
 
 
@@ -96,6 +96,20 @@ class PostcardTest(unittest.TestCase):
         r = self.run_script("--to", "Mom", "--say", "hi")
         self.assertEqual(r.returncode, 1)
         self.assertIn("Your Twinly isn't running", r.stderr)
+
+    def test_job_unverified_is_never_sent_twice(self):
+        # The text's POST makes the job but its answer is lost (503
+        # job_unverified). The job still runs, so the client must not send it
+        # again: exactly one text goes out.
+        self.mock.config({"unverify_jobs": 1, "unverify_kind": "messages.send"})
+        r = self.run_script("--to", "Mom", "--say", "hi")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("couldn't confirm this job was created", r.stderr)
+        self.assertIn("Don't send it again yet", r.stderr)
+        kinds = [j["kind"] for j in self.mock.state()["jobs"]]
+        self.assertEqual(kinds, ["voice.speak", "messages.send"], "one POST each, no retry")
+        eventually(lambda: len(self.mock.state()["outbox"]) == 1)
+        self.assertEqual(len(self.mock.state()["outbox"]), 1)
 
 
 if __name__ == "__main__":

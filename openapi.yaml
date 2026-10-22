@@ -5,16 +5,29 @@ info:
   description: |
     Your Twinly as an API. Cloud endpoints (chat, computer use, images) answer
     from Twinly's servers. Mac endpoints (messages, calls, voice, tasks) become
-    jobs that the key owner's running Twinly does on their Mac. Call GET /v1/me
-    first to see whether that Mac is online. Full guide: https://www.twinly.tech/docs/developer-api
+    jobs that the key owner's running Twinly does on their Mac.
+
+    Before a Mac endpoint works, the key owner's Mac needs Twinly 4.1.2 or
+    later, open and signed in, with the current Terms accepted and Settings ▸
+    Developer API ▸ "Let keys text, call and run tasks as you" on (it is on by
+    default). Otherwise the endpoint answers 409 twinly_offline. Call GET /v1/me
+    first: it says whether that Mac is online and what this key may call now.
+
+    Every error has the shape {"error": {"message", "type", "code", "param"}}.
+    A path that exists but not for the method you used answers 405
+    method_not_allowed with an Allow header. Full guide:
+    https://www.twinly.tech/docs/developer-api
 servers:
   - url: https://advktwnedlgnhswpxokg.supabase.co/functions/v1/twinly-api/v1
 security:
   - bearer: []
 tags:
   - name: Account
+    description: The key, its usage and the model list. No scope needed.
   - name: Cloud
+    description: Answer from Twinly's servers in the request.
   - name: Mac
+    description: Become jobs that the key owner's running Twinly does on their Mac.
 paths:
   /me:
     get:
@@ -29,10 +42,12 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Me" }
         "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /usage:
     get:
       tags: [Account]
       summary: This key's usage this month and the account's plan
+      description: No scope needed, free, but it counts toward the key's requests per minute.
       operationId: getUsage
       responses:
         "200":
@@ -41,18 +56,25 @@ paths:
             application/json:
               schema: { type: object, additionalProperties: true }
         "401": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /models:
     get:
       tags: [Account]
       summary: The one model, twinly-core
+      description: GET /v1/models/twinly-core returns the same model on its own.
       operationId: listModels
       responses:
         "200": { description: OK }
+        "401": { $ref: "#/components/responses/Error" }
   /chat/completions:
     post:
       tags: [Cloud]
       summary: Chat, OpenAI-compatible (text and images in, text out)
-      description: Scope `chat`. Works with the official openai SDKs; set base_url to the server above and model to twinly-core. No streaming.
+      description: |
+        Scope `chat`. Works with the official openai SDKs; set base_url to the
+        server above and model to twinly-core. No streaming. Fields not listed
+        here are ignored. Give your HTTP client a timeout of at least 120
+        seconds: with thinking on, a slow answer can take that long.
       operationId: createChatCompletion
       requestBody:
         required: true
@@ -62,22 +84,100 @@ paths:
               type: object
               required: [messages]
               properties:
-                model: { type: string, default: twinly-core }
+                model: { type: string, enum: [twinly-core], default: twinly-core }
                 messages:
                   type: array
+                  minItems: 1
+                  maxItems: 256
                   items:
                     type: object
-                    required: [role, content]
+                    required: [role]
                     properties:
-                      role: { type: string, enum: [system, user, assistant] }
+                      role:
+                        type: string
+                        enum: [system, developer, user, assistant, tool]
+                        description: developer is treated as system.
                       content:
+                        description: Required unless an assistant message carries tool_calls.
                         oneOf:
                           - type: string
+                          - type: "null"
                           - type: array
-                            items: { type: object, additionalProperties: true }
-                max_tokens: { type: integer }
+                            items:
+                              oneOf:
+                                - type: object
+                                  required: [type, text]
+                                  properties:
+                                    type: { type: string, const: text }
+                                    text: { type: string }
+                                - type: object
+                                  required: [type, image_url]
+                                  properties:
+                                    type: { type: string, const: image_url }
+                                    image_url:
+                                      oneOf:
+                                        - type: string
+                                        - type: object
+                                          required: [url]
+                                          properties:
+                                            url: { type: string }
+                                            detail: { type: string, enum: [low, high, auto] }
+                                      description: "A base64 data URL (data:image/png;base64,..., also jpeg, webp, gif). Remote image URLs are refused. At most 8 images per request."
+                      name: { type: string, maxLength: 64 }
+                      tool_calls:
+                        type: array
+                        description: On assistant messages. Each needs an id and a function name.
+                        items: { type: object, additionalProperties: true }
+                      tool_call_id: { type: string, description: Required on tool messages. }
+                tools:
+                  type: array
+                  maxItems: 128
+                  items:
+                    type: object
+                    required: [type, function]
+                    properties:
+                      type: { type: string, const: function }
+                      function:
+                        type: object
+                        required: [name]
+                        properties:
+                          name: { type: string, pattern: "^[A-Za-z0-9_.-]{1,64}$" }
+                          description: { type: string }
+                          parameters: { type: object, additionalProperties: true }
+                tool_choice:
+                  oneOf:
+                    - type: string
+                      enum: [none, auto, required]
+                    - type: object
+                      additionalProperties: true
+                response_format:
+                  type: object
+                  required: [type]
+                  properties:
+                    type: { type: string, enum: [text, json_object, json_schema] }
+                  additionalProperties: true
+                max_tokens: { type: integer, maximum: 8192 }
+                max_completion_tokens: { type: integer, maximum: 8192 }
+                n: { type: integer, minimum: 1, maximum: 4 }
                 temperature: { type: number, minimum: 0, maximum: 2 }
                 top_p: { type: number, minimum: 0, maximum: 1 }
+                presence_penalty: { type: number, minimum: -2, maximum: 2 }
+                frequency_penalty: { type: number, minimum: -2, maximum: 2 }
+                seed: { type: integer }
+                stop:
+                  oneOf:
+                    - type: string
+                    - type: array
+                      maxItems: 4
+                      items: { type: string }
+                reasoning_effort:
+                  type: string
+                  enum: [none, minimal, low, medium, high]
+                  description: none, minimal and low turn the model's thinking off; medium and high turn it on.
+                stream:
+                  type: boolean
+                  const: false
+                  description: Streaming isn't supported. Leave it unset or false.
       responses:
         "200":
           description: An OpenAI chat.completion object
@@ -85,14 +185,24 @@ paths:
             application/json:
               schema: { type: object, additionalProperties: true }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "402": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /computer/next-action:
     post:
       tags: [Cloud]
       summary: "One computer-use step: a goal and a screenshot in, the next action out"
-      description: Scope `computer`. Coordinates are on a 0 to 1000 grid over the screenshot. Your code performs the action.
+      description: |
+        Scope `computer`. Coordinates are on a 0 to 1000 grid over the
+        screenshot. Your code performs the action. Send the current screen as
+        `screenshot` (and optionally `previous_screenshot`), or as
+        `screenshots` with one or two images where the last one is the
+        current screen.
       operationId: nextAction
       requestBody:
         required: true
@@ -100,30 +210,67 @@ paths:
           application/json:
             schema:
               type: object
-              required: [goal, screenshot]
+              required: [goal]
+              anyOf:
+                - required: [screenshot]
+                - required: [screenshots]
               properties:
-                goal: { type: string, maxLength: 2000 }
+                goal: { type: string, minLength: 1, maxLength: 2000 }
                 screenshot: { type: string, description: "base64 PNG, JPEG or WebP (a data URL is fine), up to 4 MB" }
-                previous_screenshot: { type: string }
-                steps: { type: array, items: { type: string } }
+                previous_screenshot: { type: string, description: "The screen before your last action, in the same format" }
+                screenshots:
+                  type: array
+                  minItems: 1
+                  maxItems: 2
+                  items: { type: string }
+                  description: Instead of screenshot and previous_screenshot. The last one is the current screen.
+                steps:
+                  type: array
+                  maxItems: 50
+                  description: |
+                    The actions so far, oldest first, as objects (send back the
+                    `action` objects you were given, plus `result` if you know
+                    what happened). A string or any other non-object item is
+                    400 invalid_steps. The last 20 are used.
+                  items: { $ref: "#/components/schemas/Step" }
                 elements:
                   type: array
                   maxItems: 300
+                  description: Things on screen your code can see, with exact centers on the same grid. Each must be an object.
                   items:
                     type: object
                     properties:
-                      id: { type: integer }
+                      id: { type: [string, integer] }
                       role: { type: string }
                       label: { type: string }
-                      x: { type: number }
-                      y: { type: number }
+                      name: { type: string, description: Used when label is missing. }
+                      text: { type: string, description: Used when label and name are missing. }
+                      x: { type: number, minimum: 0, maximum: 1000 }
+                      y: { type: number, minimum: 0, maximum: 1000 }
       responses:
         "200":
-          description: The action (click, type, key, scroll, wait, done, fail and others)
+          description: One action
           content:
             application/json:
-              schema: { type: object, additionalProperties: true }
+              schema:
+                type: object
+                properties:
+                  object: { type: string, const: computer.action }
+                  model: { type: string, const: twinly-core }
+                  coordinates: { type: string, const: "0-1000" }
+                  action: { $ref: "#/components/schemas/Action" }
+                  blocked:
+                    type: string
+                    description: "sensitive_value when the action is a fail because a field needs a password, card or ID number."
+                  usage: { type: object, additionalProperties: true }
         "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /images:
     post:
       tags: [Cloud]
@@ -155,12 +302,24 @@ paths:
                       properties:
                         b64_json: { type: string }
                         mime: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "422": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /messages:
     post:
       tags: [Mac]
       summary: Send an iMessage from the owner's number
-      description: Scope `messages.send`. Waits 25 seconds by default.
+      description: |
+        Scope `messages.send`. Waits 25 seconds by default. Pass exactly one of
+        `to` and `chat`. `text` is always required; it may be an empty string
+        when you send at least one attachment. A request can be at most 34 MB.
+        On 503 `job_unverified` the job may exist and may still send: do not
+        resend until you have checked (see the guide).
       operationId: sendMessage
       parameters: [{ $ref: "#/components/parameters/Wait" }]
       requestBody:
@@ -169,46 +328,64 @@ paths:
           application/json:
             schema:
               type: object
+              required: [text]
+              oneOf:
+                - required: [to]
+                - required: [chat]
               properties:
-                to: { type: string, description: "A phone number, email or contact name (pass exactly one of to and chat)" }
-                chat: { type: string, description: "A group chat's id or name" }
-                text: { type: string, maxLength: 4000 }
+                to: { type: string, maxLength: 128, description: "A phone number, email or contact name" }
+                chat: { type: string, maxLength: 256, description: "A group chat's id or name" }
+                text: { type: string, maxLength: 4000, description: "Required. May be empty only when attachments has at least one file." }
                 attachments:
                   type: array
                   maxItems: 4
                   items:
                     oneOf:
                       - type: string
-                        description: An https URL on a public host
-                      - type: object
-                        required: [name, b64]
-                        properties:
-                          name: { type: string }
-                          mime: { type: string }
-                          b64: { type: string }
+                        format: uri
+                        description: An https URL on a public host name (no IP addresses, no localhost, .local or .lan). The Mac downloads it, up to 25 MB.
+                      - $ref: "#/components/schemas/InlineFile"
       responses:
         "200": { $ref: "#/components/responses/Job" }
         "202": { $ref: "#/components/responses/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
     get:
       tags: [Mac]
       summary: Read a chat's recent messages
-      description: Scope `messages.read`. Pass chat or with.
+      description: Scope `messages.read`. Pass exactly one of chat and with. Waits 25 seconds by default.
       operationId: readMessages
       parameters:
-        - { name: chat, in: query, schema: { type: string } }
-        - { name: with, in: query, schema: { type: string } }
+        - { name: chat, in: query, description: "A chat's id or name", schema: { type: string, maxLength: 256 } }
+        - { name: with, in: query, description: "A phone number, email or contact (a one-to-one chat)", schema: { type: string, maxLength: 128 } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
         - { $ref: "#/components/parameters/Wait" }
       responses:
         "200": { $ref: "#/components/responses/Job" }
         "202": { $ref: "#/components/responses/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /calls:
     post:
       tags: [Mac]
       summary: Place a phone call in the owner's voice
-      description: Scope `calls`. Result has minutes, transcript and outcome. Doesn't wait by default.
+      description: |
+        Scope `calls`. Result has minutes, transcript and outcome. Doesn't wait
+        by default. The owner's Mac needs Google Voice (US numbers) signed in
+        inside Google Chrome, BlackHole 2ch, Screen Recording for Twinly, a
+        recorded voice, and Chrome's "Allow JavaScript from Apple Events"; a
+        missing piece fails the job before anything is dialed.
       operationId: placeCall
       parameters: [{ $ref: "#/components/parameters/Wait" }]
       requestBody:
@@ -219,18 +396,27 @@ paths:
               type: object
               required: [to, goal]
               properties:
-                to: { type: string }
+                to: { type: string, maxLength: 128, description: "A phone number or a contact name" }
                 goal: { type: string, maxLength: 2000 }
-                say: { type: string, maxLength: 1000 }
+                say:
+                  type: string
+                  maxLength: 1000
+                  description: The opening line. Only its first sentence is spoken as the opener; the rest is added to the goal.
       responses:
         "200": { $ref: "#/components/responses/Job" }
         "202": { $ref: "#/components/responses/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /voice/speak:
     post:
       tags: [Mac]
       summary: Speak a line in the owner's cloned voice
-      description: Scope `voice`. Result has audio_b64 (m4a), mime and seconds.
+      description: Scope `voice`. Result has audio_b64 (m4a), mime and seconds. Waits 25 seconds by default.
       operationId: speak
       parameters: [{ $ref: "#/components/parameters/Wait" }]
       requestBody:
@@ -241,11 +427,17 @@ paths:
               type: object
               required: [text]
               properties:
-                text: { type: string }
+                text: { type: string, minLength: 1, maxLength: 600 }
       responses:
         "200": { $ref: "#/components/responses/Job" }
         "202": { $ref: "#/components/responses/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /tasks:
     post:
       tags: [Mac]
@@ -265,20 +457,26 @@ paths:
               type: object
               required: [prompt]
               properties:
-                prompt: { type: string, maxLength: 4000 }
+                prompt: { type: string, minLength: 1, maxLength: 4000 }
                 output_schema:
                   type: object
-                  description: A JSON Schema (up to 8 KB) the answer is returned in, as result.data
+                  description: A JSON Schema object (up to 8000 bytes as JSON). The result then carries data, parsed, or data null and data_error.
                   additionalProperties: true
       responses:
         "200": { $ref: "#/components/responses/Job" }
         "202": { $ref: "#/components/responses/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /jobs/{id}:
     get:
       tags: [Mac]
       summary: A job's status and result
-      description: With wait, answers as soon as anything about the job changes.
+      description: With wait, answers as soon as the job finishes or its status changes. A key sees only its own jobs.
       operationId: getJob
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
@@ -286,17 +484,31 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/Job" }
         "202": { $ref: "#/components/responses/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /jobs/{id}/cancel:
     post:
       tags: [Mac]
-      summary: Cancel a job that hasn't finished
+      summary: Cancel a job that is still queued
+      description: |
+        Only a `queued` job can be canceled (200 with the job; canceling it
+        again is also 200). A job the owner's Mac already has is
+        `409 job_running` (the owner can stop it in Twinly); a finished one is
+        `409 job_finished`. Another key's job, or an unknown id, is
+        `404 job_not_found`.
       operationId: cancelJob
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "200": { $ref: "#/components/responses/Job" }
+        "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     bearer:
@@ -307,8 +519,8 @@ components:
     Wait:
       name: wait
       in: query
-      description: Seconds (0 to 25) to hold the request open for the job to finish
-      schema: { type: integer, minimum: 0, maximum: 25 }
+      description: Seconds (0 to 25, decimals allowed) to hold the request open for the job to finish
+      schema: { type: number, minimum: 0, maximum: 25 }
   responses:
     Job:
       description: The job. 200 once it finished, 202 while it hasn't.
@@ -344,6 +556,43 @@ components:
           properties:
             cloud: { type: array, items: { type: string } }
             mac: { type: array, items: { type: string } }
+    Step:
+      type: object
+      description: One earlier action. Every field is optional; the ones below are read.
+      properties:
+        type: { type: string, description: "click, double_click, type, key, scroll, wait, done or fail" }
+        action: { type: string, description: Read when type is missing. }
+        x: { type: number }
+        y: { type: number }
+        label: { type: string }
+        keys: { type: string }
+        text: { type: string }
+        direction: { type: string }
+        reason: { type: string }
+        result: { type: string, description: What happened when your code performed it. }
+      additionalProperties: true
+    Action:
+      type: object
+      required: [type, reason, commits]
+      properties:
+        type: { type: string, enum: [click, double_click, type, key, scroll, wait, done, fail] }
+        x: { type: integer, minimum: 0, maximum: 1000 }
+        y: { type: integer, minimum: 0, maximum: 1000 }
+        text: { type: string }
+        keys: { type: string }
+        direction: { type: string, enum: [up, down, left, right] }
+        amount: { type: integer, minimum: 1, maximum: 20 }
+        seconds: { type: number, minimum: 0.2, maximum: 10 }
+        label: { type: string }
+        reason: { type: string }
+        commits: { type: boolean, description: "true: this step sends, posts, pays, books, deletes or submits. Ask a person first." }
+    InlineFile:
+      type: object
+      required: [name, mime, b64]
+      properties:
+        name: { type: string, maxLength: 255, description: "A plain file name, no folders" }
+        mime: { type: string, description: 'A media type like "image/jpeg" or "audio/mp4"' }
+        b64: { type: string, description: "Standard padded base64 of the file, no data: prefix, up to 25 MB decoded" }
     Job:
       type: object
       properties:
@@ -356,11 +605,23 @@ components:
         result:
           type: [object, "null"]
           additionalProperties: true
-          description: Set only when status is done
+          description: |
+            Set only when status is done.
+            messages.send: {to, delivered (true, false or null), sent_at}.
+            messages.read: {messages: [{from, name, text, at}]}.
+            calls.place: {minutes, transcript: [{who: them or twin, text}], outcome}.
+            voice.speak: {audio_b64, mime, seconds}.
+            tasks.run: {answer, files: [{name, mime, b64}], files_skipped?, data?, data_error?}.
         error:
+          description: Set when status is failed, canceled or expired. The guide lists every code.
           oneOf:
             - type: "null"
-            - $ref: "#/components/schemas/ErrorBody"
+            - $ref: "#/components/schemas/JobError"
+    JobError:
+      type: object
+      properties:
+        code: { type: string }
+        message: { type: string }
     ErrorBody:
       type: object
       properties:

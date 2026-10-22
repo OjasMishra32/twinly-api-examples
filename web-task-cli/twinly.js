@@ -8,6 +8,10 @@ import fs from "node:fs";
 
 const DEFAULT_BASE = "https://advktwnedlgnhswpxokg.supabase.co/functions/v1/twinly-api/v1";
 export const FINISHED = new Set(["done", "failed", "canceled", "expired"]);
+// A POST answered with one of these may already have done its work: the job
+// was made (and may still send a text or place a call), or the model ran and
+// was charged. Retrying could do it twice, so these are never retried.
+const NOT_SAFE_TO_RETRY = new Set(["job_unverified", "billing_record_failed", "billing_unverified"]);
 
 export class TwinlyError extends Error {
   constructor(status, code, message) {
@@ -50,7 +54,9 @@ export async function twinly(method, path, body) {
     const data = await res.json().catch(() => ({}));
     const code = data.error?.code;
     // Too fast, or Twinly busy for a moment: wait as told and try again.
-    if (attempt < 3 && (res.status === 503 || (res.status === 429 && code === "rate_limited"))) {
+    // Never for a POST whose work may already have happened.
+    const safe = method === "GET" || !NOT_SAFE_TO_RETRY.has(code);
+    if (attempt < 3 && safe && (res.status === 503 || (res.status === 429 && code === "rate_limited"))) {
       await sleep(Number(res.headers.get("retry-after") ?? 2) * 1000);
       continue;
     }
@@ -75,10 +81,13 @@ export async function waitForJob(job, onUpdate = () => {}) {
 /** One line a person can act on, for an API error or a job that didn't finish. */
 export function explain(err) {
   const hints = {
-    twinly_offline: "Open Twinly on your Mac, sign in, and keep Settings ▸ Developer API on.",
+    twinly_offline:
+      "Open Twinly on your Mac, sign in, accept the Terms if it asks, and keep Settings ▸ Developer API ▸ “Let keys text, call and run tasks as you” on.",
     insufficient_usage: "Redeem a code in Twinly ▸ Settings ▸ Developer API, or add extra usage on Account.",
     missing_api_key: "",
     invalid_api_key: "Check TWINLY_API_KEY in .env.",
+    job_unverified: "It may still run. Don't send it again yet: wait a minute, then check Twinly's task list.",
+    voice_not_set_up: "Record your voice on Twinly's Voice screen, then Build my clone.",
     scope_missing: "",
   };
   const hint = hints[err.code];

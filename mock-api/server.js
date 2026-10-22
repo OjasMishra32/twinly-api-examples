@@ -215,6 +215,13 @@ function defaultConfig() {
     allow_local_attachments: false,
     // A fixed reply for POST /v1/chat/completions (otherwise a stock line).
     chat_reply: null,
+    // Production can answer a job POST with 503 job_unverified after the job
+    // was made (and will still run), or a chat with 503 billing_unverified
+    // after the model ran. Set a count to have the next N do exactly that, so
+    // a client's retry logic can be tested: it must not send again.
+    unverify_jobs: 0,
+    unverify_kind: null, // only jobs of this kind ("messages.send", ...); null = any
+    unverify_chat: 0,
   };
 }
 
@@ -365,13 +372,25 @@ export function createMockApi(options = {}) {
     later(runMs, () => execute(j));
   }
 
+  // The codes the real Mac writes when a step fails (APIExecutors.swift): the
+  // message says why, the code says which kind of job it was.
+  const FAIL_CODE = {
+    "messages.send": "send_failed",
+    "messages.read": "read_failed",
+    "calls.place": "call_failed",
+    "voice.speak": "voice_failed",
+    "tasks.run": "task_failed",
+  };
+
   async function execute(j) {
     if (j.status !== "running") return;
     try {
       const result = await run(j);
       if (j.status === "running") setStatus(j, "done", { result });
     } catch (e) {
-      if (j.status === "running") setStatus(j, "failed", { error: { code: e.code ?? "mac_error", message: e.message } });
+      if (j.status === "running") {
+        setStatus(j, "failed", { error: { code: e.code ?? FAIL_CODE[j.kind] ?? "failed", message: e.message } });
+      }
     }
   }
 
@@ -380,7 +399,7 @@ export function createMockApi(options = {}) {
     if (!j) throw new Error("No such job.");
     if (j.status !== "needs_approval") throw new Error(`The job is ${j.status}, not needs_approval.`);
     if (!approve) {
-      setStatus(j, "failed", { error: { code: "declined", message: "The owner declined this in Twinly." } });
+      setStatus(j, "failed", { error: { code: "declined", message: "The owner declined this in Twinly, so nothing was done." } });
       return publicJob(j);
     }
     j.status = "running";
@@ -402,13 +421,15 @@ export function createMockApi(options = {}) {
     const c = CONTACTS.find((x) => x.name.toLowerCase() === String(raw).trim().toLowerCase());
     if (c) return c.handle;
     if (String(raw).trim().toLowerCase() === "me") return OWNER.handle;
-    throw macFail("recipient_not_found", `Twinly couldn't find "${raw}" in your contacts. Send a phone number or email instead.`);
+    throw macFail(null, `Twinly couldn't find "${raw}" in your contacts. Send a phone number or email instead.`);
   }
 
   function resolveChat(raw) {
     const q = String(raw).trim().toLowerCase();
     const c = state.chats.find((x) => x.id.toLowerCase() === q || (x.name && x.name.toLowerCase() === q));
-    if (!c) throw macFail("chat_not_found", `Twinly couldn't find a chat called "${raw}".`);
+    if (!c) {
+      throw macFail(null, `Couldn't find a chat matching "${raw}". Use the chat's exact name or id, or with=<number> for a one-to-one chat.`);
+    }
     return c;
   }
 
@@ -430,11 +451,11 @@ export function createMockApi(options = {}) {
     try {
       res = await fetch(url, { signal: AbortSignal.timeout(10_000) });
     } catch (e) {
-      throw macFail("attachment_unavailable", `Twinly couldn't download ${url} (${e.message}).`);
+      throw macFail("attachment_failed", `An attachment couldn't be downloaded (${e.message}).`);
     }
-    if (!res.ok) throw macFail("attachment_unavailable", `Twinly couldn't download ${url} (HTTP ${res.status}).`);
+    if (!res.ok) throw macFail("attachment_failed", `An attachment couldn't be downloaded (HTTP ${res.status}).`);
     const buf = Buffer.from(await res.arrayBuffer());
-    if (buf.length > MAX_ATTACHMENT_BYTES) throw macFail("attachment_too_large", `${url} is over 25 MB.`);
+    if (buf.length > MAX_ATTACHMENT_BYTES) throw macFail("attachment_failed", "An attachment is over 25 MB.");
     return {
       source: "url",
       url,
@@ -794,8 +815,9 @@ export function createMockApi(options = {}) {
   function parseWait(query, kind) {
     const raw = query.get("wait");
     if (raw === null) return DEFAULT_WAIT[kind] ?? 0;
-    if (!/^\d+(\.\d+)?$/.test(raw) || Number(raw) > MAX_WAIT) throw bad("wait must be a number of seconds from 0 to 25.", "wait");
-    return Number(raw);
+    const n = Number(raw.trim());
+    if (!raw.trim() || !Number.isFinite(n) || n < 0 || n > MAX_WAIT) throw bad("wait must be a number of seconds from 0 to 25.", "wait");
+    return n;
   }
 
   /** A one-line value (a recipient, a chat): trimmed, no control characters. */
@@ -871,6 +893,93 @@ export function createMockApi(options = {}) {
       if (bytes > MAX_ATTACHMENT_BYTES) throw bad("Each attachment is limited to 25 MB.", `${where}.b64`, "attachment_too_large");
       return { name, mime: a.mime.toLowerCase(), b64: a.b64 };
     });
+  }
+
+  // ── Cloud request checks, the same ones production makes (chat.ts, computer.ts)
+
+  const ROLES = new Set(["system", "developer", "user", "assistant", "tool"]);
+  const IMAGE_DATA_URL = /^data:image\/(png|jpeg|jpg|webp|gif);base64,[A-Za-z0-9+/=\s]+$/;
+
+  function validateChatMessages(messages) {
+    const no = (message, code, param) => new ApiError(400, message, code, { param });
+    if (!Array.isArray(messages) || messages.length === 0) throw no("messages must be a non-empty array.", "invalid_messages", "messages");
+    if (messages.length > 256) throw no("At most 256 messages per request.", "too_many_messages", "messages");
+    let images = 0;
+    messages.forEach((m, i) => {
+      if (!isObject(m) || typeof m.role !== "string" || !ROLES.has(m.role)) {
+        throw no("Each message needs a role: system, developer, user, assistant or tool.", "invalid_role", `messages[${i}].role`);
+      }
+      const c = m.content;
+      if (c !== null && c !== undefined && typeof c !== "string") {
+        if (!Array.isArray(c)) throw no("Message content must be a string or an array of parts.", "invalid_content", `messages[${i}].content`);
+        c.forEach((part, j) => {
+          const where = `messages[${i}].content[${j}]`;
+          if (!isObject(part)) throw no("Each content part must be an object.", "invalid_content", where);
+          if (part.type === "text" && typeof part.text === "string") return;
+          if (part.type === "image_url") {
+            const url = isObject(part.image_url) ? part.image_url.url : typeof part.image_url === "string" ? part.image_url : undefined;
+            if (typeof url !== "string" || !IMAGE_DATA_URL.test(url)) {
+              throw no("Images must be base64 data URLs (data:image/png;base64,... or jpeg, webp, gif). Remote image URLs are not fetched.",
+                "invalid_image", where);
+            }
+            if (++images > 8) throw no("At most 8 images per request.", "too_many_images", where);
+            return;
+          }
+          throw no("Supported content parts are text and image_url.", "unsupported_content", where);
+        });
+      }
+      if (m.role === "tool" && typeof m.tool_call_id !== "string") {
+        throw no("A tool message needs tool_call_id.", "invalid_tool_message", `messages[${i}].tool_call_id`);
+      }
+      const hasCalls = m.role === "assistant" && m.tool_calls !== undefined;
+      if ((c === null || c === undefined) && !hasCalls) throw no("A message needs content.", "invalid_content", `messages[${i}].content`);
+    });
+  }
+
+  /** What an image's bytes really are (PNG, JPEG or WebP), or null. */
+  function screenshotProblem(raw) {
+    if (typeof raw !== "string" || raw.length === 0) return "must be a base64 PNG, JPEG or WebP string";
+    let b64 = raw.trim().replace(/^data:image\/[a-z+]+;base64,/i, "").replace(/\s+/g, "");
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) return "is not valid base64";
+    if (Math.floor((b64.length * 3) / 4) > 4 * 1024 * 1024) return "is over 4 MB; send a JPEG";
+    const h = Buffer.from(b64.slice(0, 16), "base64");
+    const png = h[0] === 0x89 && h[1] === 0x50 && h[2] === 0x4e && h[3] === 0x47;
+    const jpeg = h[0] === 0xff && h[1] === 0xd8 && h[2] === 0xff;
+    const webp = h.slice(0, 4).toString("latin1") === "RIFF" && h.slice(8, 12).toString("latin1") === "WEBP";
+    return png || jpeg || webp ? null : "is not a PNG, JPEG or WebP image";
+  }
+
+  function validateNextAction(body) {
+    const no = (message, code, param) => new ApiError(400, message, code, { param });
+    const goal = typeof body.goal === "string" ? body.goal.trim() : "";
+    if (!goal) throw no("goal is required: say what should be true when the task is finished.", "invalid_goal", "goal");
+    if (goal.length > 2000) throw no("goal must be at most 2000 characters.", "invalid_goal", "goal");
+    let current = body.screenshot;
+    let previous = body.previous_screenshot;
+    if (current === undefined && Array.isArray(body.screenshots)) {
+      if (body.screenshots.length < 1 || body.screenshots.length > 2) {
+        throw no("screenshots must hold one or two images; the last one is the current screen.", "invalid_screenshot", "screenshots");
+      }
+      current = body.screenshots[body.screenshots.length - 1];
+      previous = body.screenshots.length === 2 ? body.screenshots[0] : undefined;
+    }
+    if (current === undefined) throw no("screenshot is required.", "invalid_screenshot", "screenshot");
+    const bad = screenshotProblem(current);
+    if (bad) throw no(`screenshot ${bad}.`, "invalid_screenshot", "screenshot");
+    if (previous !== undefined && previous !== null) {
+      const badPrev = screenshotProblem(previous);
+      if (badPrev) throw no(`previous_screenshot ${badPrev}.`, "invalid_screenshot", "previous_screenshot");
+    }
+    if (body.steps !== undefined && body.steps !== null) {
+      if (!Array.isArray(body.steps) || body.steps.length > 50 || !body.steps.every(isObject)) {
+        throw no("steps must be an array of at most 50 objects.", "invalid_steps", "steps");
+      }
+    }
+    if (body.elements !== undefined && body.elements !== null) {
+      if (!Array.isArray(body.elements) || body.elements.length > 300 || !body.elements.every(isObject)) {
+        throw no("elements must be an array of at most 300 objects.", "invalid_elements", "elements");
+      }
+    }
   }
 
   function validateJob(kind, body, query) {
@@ -961,6 +1070,12 @@ export function createMockApi(options = {}) {
     };
     state.jobs.set(j.id, j);
     pump();
+    if (config.unverify_jobs > 0 && (!config.unverify_kind || config.unverify_kind === kind)) {
+      // The job exists and runs; only the answer is lost, as in production.
+      config.unverify_jobs -= 1;
+      throw new ApiError(503, "Twinly couldn't confirm this job was created. Check GET /v1/jobs before retrying.",
+        "job_unverified", { headers: { "retry-after": "2" } });
+    }
     await waitFor(j, wait);
     send(res, TERMINAL.has(j.status) ? 200 : 202, publicJob(j));
   }
@@ -1041,7 +1156,9 @@ export function createMockApi(options = {}) {
         const j = ownJob(entry, jobId);
         // Only a job still waiting in line can be canceled from the API; once
         // it's on the owner's Mac, the owner stops it in Twinly.
-        if (j.status === "queued") setStatus(j, "canceled", { error: { code: "canceled", message: "This job was canceled." } });
+        if (j.status === "queued") {
+          setStatus(j, "canceled", { error: { code: "canceled", message: "Canceled through the API before the owner's Mac picked it up." } });
+        }
         if (j.status === "canceled") return send(res, 200, publicJob(j));
         if (j.status === "running" || j.status === "needs_approval") {
           throw new ApiError(409, "This job is already running on the owner's Mac, so it can't be canceled from the API. The owner can stop it in Twinly.",
@@ -1055,15 +1172,19 @@ export function createMockApi(options = {}) {
           throw new ApiError(404, `The model '${String(body.model).slice(0, 64)}' does not exist. Use '${MODEL}'.`, "model_not_found", { param: "model" });
         }
         if (body.stream === true) throw new ApiError(400, "Streaming isn't supported yet. Leave stream unset or false.", "stream_not_supported", { param: "stream" });
-        if (!Array.isArray(body.messages) || body.messages.length === 0) {
-          throw new ApiError(400, "messages must be a non-empty array.", "invalid_messages", { param: "messages" });
-        }
+        validateChatMessages(body.messages);
         requireCredits(MOCK_CHAT_CREDITS, "this chat request");
         state.chatRequests.push(body);
         const last = lastUserText(body.messages);
         const content = config.chat_reply ??
           `Mock reply from twinly-core (no model was called). Your last message began: "${last.slice(0, 120)}"`;
         charge(entry, "chat", MOCK_CHAT_CREDITS);
+        if (config.unverify_chat > 0) {
+          // The model ran and was charged; only the receipt is in doubt.
+          config.unverify_chat -= 1;
+          throw new ApiError(503, "Twinly couldn't verify this usage record. Try again in a moment.", "billing_unverified",
+            { headers: { "retry-after": "3" } });
+        }
         const promptTokens = Math.ceil(JSON.stringify(body.messages).length / 4);
         const completionTokens = Math.ceil(content.length / 4);
         return send(res, 200, {
@@ -1074,11 +1195,7 @@ export function createMockApi(options = {}) {
       }
       case "next-action": {
         const body = await jsonBody(req, name);
-        if (!nonEmpty(body.goal) || body.goal.length > 2000) throw new ApiError(400, "goal is required (up to 2000 characters).", "invalid_goal", { param: "goal" });
-        const shot = typeof body.screenshot === "string" ? body.screenshot.replace(/^data:image\/[a-z]+;base64,/, "") : "";
-        if (!shot || !/^[A-Za-z0-9+/]+={0,2}$/.test(shot)) {
-          throw new ApiError(400, "screenshot must be a base64 PNG, JPEG or WebP string.", "invalid_screenshot", { param: "screenshot" });
-        }
+        validateNextAction(body);
         requireCredits(MOCK_NEXT_ACTION_CREDITS, "this computer request");
         charge(entry, "computer", MOCK_NEXT_ACTION_CREDITS);
         const n = Array.isArray(body.steps) ? body.steps.length : 0;
@@ -1166,7 +1283,7 @@ export function createMockApi(options = {}) {
       // The owner pressing Stop on the job in Twinly: the Mac marks it canceled.
       const j = state.jobs.get(m[1]);
       if (!j || !["running", "needs_approval"].includes(j.status)) return send(res, 400, { error: "only a running or held job can be stopped" });
-      setStatus(j, "canceled", { error: { code: "canceled", message: "The owner stopped this job in Twinly." } });
+      setStatus(j, "canceled", { error: { code: "stopped_by_owner", message: "The owner stopped this in Twinly." } });
       return ok(publicJob(j));
     }
     return send(res, 404, { error: "unknown mock control" });
