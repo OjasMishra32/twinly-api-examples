@@ -1,0 +1,11 @@
+{
+  "name": "twinly-imessage-bot",
+  "private": true,
+  "description": "An @twinly weather bot for any iMessage chat, driven by Twinly's bot.command webhook.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node bot.js",
+    "test": "node --test test/bot.test.js"
+  }
+}

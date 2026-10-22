@@ -1,0 +1,11 @@
+{
+  "name": "twinly-group-digest",
+  "private": true,
+  "description": "Read a group chat through your Twinly and get a short digest of it.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node digest.js",
+    "test": "node --test test/digest.test.js"
+  }
+}

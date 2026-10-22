@@ -1,0 +1,16 @@
+# Never commit a real key or webhook secret.
+.env
+.env.*
+node_modules/
+.pytest_cache/
+.DS_Store
+
+# The repo root ignores .env.* so real keys never land in git. The templates
+# below hold no secrets and every project ships one.
+!.env.example
+
+# What the examples write when you run them.
+out/
+postcard-*.m4a
+meme-*.jpg
+__pycache__/

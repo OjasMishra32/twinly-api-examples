@@ -1,0 +1,374 @@
+openapi: 3.1.0
+info:
+  title: Twinly API
+  version: "2.0"
+  description: |
+    Your Twinly as an API. Cloud endpoints (chat, computer use, images) answer
+    from Twinly's servers. Mac endpoints (messages, calls, voice, tasks) become
+    jobs that the key owner's running Twinly does on their Mac. Call GET /v1/me
+    first to see whether that Mac is online. Full guide: https://www.twinly.tech/docs/developer-api
+servers:
+  - url: https://advktwnedlgnhswpxokg.supabase.co/functions/v1/twinly-api/v1
+security:
+  - bearer: []
+tags:
+  - name: Account
+  - name: Cloud
+  - name: Mac
+paths:
+  /me:
+    get:
+      tags: [Account]
+      summary: The key, its scopes, and whether the owner's Mac can run jobs now
+      description: No scope needed, free. Call it before a demo.
+      operationId: getMe
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Error" }
+  /usage:
+    get:
+      tags: [Account]
+      summary: This key's usage this month and the account's plan
+      operationId: getUsage
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "401": { $ref: "#/components/responses/Error" }
+  /models:
+    get:
+      tags: [Account]
+      summary: The one model, twinly-core
+      operationId: listModels
+      responses:
+        "200": { description: OK }
+  /chat/completions:
+    post:
+      tags: [Cloud]
+      summary: Chat, OpenAI-compatible (text and images in, text out)
+      description: Scope `chat`. Works with the official openai SDKs; set base_url to the server above and model to twinly-core. No streaming.
+      operationId: createChatCompletion
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messages]
+              properties:
+                model: { type: string, default: twinly-core }
+                messages:
+                  type: array
+                  items:
+                    type: object
+                    required: [role, content]
+                    properties:
+                      role: { type: string, enum: [system, user, assistant] }
+                      content:
+                        oneOf:
+                          - type: string
+                          - type: array
+                            items: { type: object, additionalProperties: true }
+                max_tokens: { type: integer }
+                temperature: { type: number, minimum: 0, maximum: 2 }
+                top_p: { type: number, minimum: 0, maximum: 1 }
+      responses:
+        "200":
+          description: An OpenAI chat.completion object
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error" }
+        "402": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /computer/next-action:
+    post:
+      tags: [Cloud]
+      summary: "One computer-use step: a goal and a screenshot in, the next action out"
+      description: Scope `computer`. Coordinates are on a 0 to 1000 grid over the screenshot. Your code performs the action.
+      operationId: nextAction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [goal, screenshot]
+              properties:
+                goal: { type: string, maxLength: 2000 }
+                screenshot: { type: string, description: "base64 PNG, JPEG or WebP (a data URL is fine), up to 4 MB" }
+                previous_screenshot: { type: string }
+                steps: { type: array, items: { type: string } }
+                elements:
+                  type: array
+                  maxItems: 300
+                  items:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      role: { type: string }
+                      label: { type: string }
+                      x: { type: number }
+                      y: { type: number }
+      responses:
+        "200":
+          description: The action (click, type, key, scroll, wait, done, fail and others)
+          content:
+            application/json:
+              schema: { type: object, additionalProperties: true }
+        "400": { $ref: "#/components/responses/Error" }
+  /images:
+    post:
+      tags: [Cloud]
+      summary: Make a picture from a description
+      description: Scope `images`. A real person is never drawn from their name (`422 content_filtered`); describe their look instead.
+      operationId: createImage
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string, maxLength: 2000 }
+                shape: { type: string, enum: [square, wide, tall], default: square }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        b64_json: { type: string }
+                        mime: { type: string }
+        "422": { $ref: "#/components/responses/Error" }
+  /messages:
+    post:
+      tags: [Mac]
+      summary: Send an iMessage from the owner's number
+      description: Scope `messages.send`. Waits 25 seconds by default.
+      operationId: sendMessage
+      parameters: [{ $ref: "#/components/parameters/Wait" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                to: { type: string, description: "A phone number, email or contact name (pass exactly one of to and chat)" }
+                chat: { type: string, description: "A group chat's id or name" }
+                text: { type: string, maxLength: 4000 }
+                attachments:
+                  type: array
+                  maxItems: 4
+                  items:
+                    oneOf:
+                      - type: string
+                        description: An https URL on a public host
+                      - type: object
+                        required: [name, b64]
+                        properties:
+                          name: { type: string }
+                          mime: { type: string }
+                          b64: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Job" }
+        "202": { $ref: "#/components/responses/Job" }
+        "409": { $ref: "#/components/responses/Error" }
+    get:
+      tags: [Mac]
+      summary: Read a chat's recent messages
+      description: Scope `messages.read`. Pass chat or with.
+      operationId: readMessages
+      parameters:
+        - { name: chat, in: query, schema: { type: string } }
+        - { name: with, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 20 } }
+        - { $ref: "#/components/parameters/Wait" }
+      responses:
+        "200": { $ref: "#/components/responses/Job" }
+        "202": { $ref: "#/components/responses/Job" }
+        "409": { $ref: "#/components/responses/Error" }
+  /calls:
+    post:
+      tags: [Mac]
+      summary: Place a phone call in the owner's voice
+      description: Scope `calls`. Result has minutes, transcript and outcome. Doesn't wait by default.
+      operationId: placeCall
+      parameters: [{ $ref: "#/components/parameters/Wait" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, goal]
+              properties:
+                to: { type: string }
+                goal: { type: string, maxLength: 2000 }
+                say: { type: string, maxLength: 1000 }
+      responses:
+        "200": { $ref: "#/components/responses/Job" }
+        "202": { $ref: "#/components/responses/Job" }
+        "409": { $ref: "#/components/responses/Error" }
+  /voice/speak:
+    post:
+      tags: [Mac]
+      summary: Speak a line in the owner's cloned voice
+      description: Scope `voice`. Result has audio_b64 (m4a), mime and seconds.
+      operationId: speak
+      parameters: [{ $ref: "#/components/parameters/Wait" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                text: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Job" }
+        "202": { $ref: "#/components/responses/Job" }
+        "409": { $ref: "#/components/responses/Error" }
+  /tasks:
+    post:
+      tags: [Mac]
+      summary: Run a full Twinly task on the owner's Mac
+      description: |
+        Scope `tasks`. Anything Twinly does in the app: research, the browser, the
+        owner's calendar and files, the screen when needed. Result has answer and
+        files; with output_schema it also has data in that shape. A task never
+        stops to ask a question. Doesn't wait by default.
+      operationId: runTask
+      parameters: [{ $ref: "#/components/parameters/Wait" }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [prompt]
+              properties:
+                prompt: { type: string, maxLength: 4000 }
+                output_schema:
+                  type: object
+                  description: A JSON Schema (up to 8 KB) the answer is returned in, as result.data
+                  additionalProperties: true
+      responses:
+        "200": { $ref: "#/components/responses/Job" }
+        "202": { $ref: "#/components/responses/Job" }
+        "409": { $ref: "#/components/responses/Error" }
+  /jobs/{id}:
+    get:
+      tags: [Mac]
+      summary: A job's status and result
+      description: With wait, answers as soon as anything about the job changes.
+      operationId: getJob
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+        - { $ref: "#/components/parameters/Wait" }
+      responses:
+        "200": { $ref: "#/components/responses/Job" }
+        "202": { $ref: "#/components/responses/Job" }
+        "404": { $ref: "#/components/responses/Error" }
+  /jobs/{id}/cancel:
+    post:
+      tags: [Mac]
+      summary: Cancel a job that hasn't finished
+      operationId: cancelJob
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200": { $ref: "#/components/responses/Job" }
+        "404": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    bearer:
+      type: http
+      scheme: bearer
+      description: A twk_live_ key from Twinly, Settings, Developer API. Server side only.
+  parameters:
+    Wait:
+      name: wait
+      in: query
+      description: Seconds (0 to 25) to hold the request open for the job to finish
+      schema: { type: integer, minimum: 0, maximum: 25 }
+  responses:
+    Job:
+      description: The job. 200 once it finished, 202 while it hasn't.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Job" }
+    Error:
+      description: An error in OpenAI's shape
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Me:
+      type: object
+      properties:
+        object: { type: string, const: me }
+        key:
+          type: object
+          properties:
+            id: { type: string }
+            name: { type: string }
+            prefix: { type: string }
+            scopes: { type: array, items: { type: string } }
+        mac:
+          type: object
+          properties:
+            online: { type: boolean }
+            last_seen: { type: [string, "null"], format: date-time }
+            app_version: { type: [string, "null"] }
+            hint: { type: [string, "null"] }
+        can:
+          type: object
+          properties:
+            cloud: { type: array, items: { type: string } }
+            mac: { type: array, items: { type: string } }
+    Job:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        object: { type: string, const: job }
+        kind: { type: string, enum: [messages.send, messages.read, calls.place, voice.speak, tasks.run] }
+        status: { type: string, enum: [queued, running, needs_approval, done, failed, canceled, expired] }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        result:
+          type: [object, "null"]
+          additionalProperties: true
+          description: Set only when status is done
+        error:
+          oneOf:
+            - type: "null"
+            - $ref: "#/components/schemas/ErrorBody"
+    ErrorBody:
+      type: object
+      properties:
+        message: { type: string }
+        type: { type: string }
+        code: { type: string }
+        param: { type: [string, "null"] }
+    Error:
+      type: object
+      properties:
+        error: { $ref: "#/components/schemas/ErrorBody" }

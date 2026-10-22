@@ -1,0 +1,11 @@
+{
+  "name": "twinly-web-task-cli",
+  "private": true,
+  "description": "Give your Twinly a task from the terminal; print the answer, save the files.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node task.js",
+    "test": "node --test test/task.test.js"
+  }
+}

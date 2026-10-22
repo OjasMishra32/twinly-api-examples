@@ -1,0 +1,11 @@
+{
+  "name": "twinly-mock-api",
+  "private": true,
+  "description": "A local stand-in for the Twinly API v2, for building and testing with no account.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/"
+  }
+}
