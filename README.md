@@ -92,15 +92,15 @@ into Postman or Insomnia to try every endpoint without writing code.
 Tip: `POST /v1/tasks` takes an `output_schema` (a JSON Schema) and returns the
 answer as `data` in that shape, so your app gets fields instead of a paragraph.
 
-## 2. Redeem your $20 voucher
+## 2. Redeem your event code
 
-**Settings ▸ Developer API ▸ Redeem a code** (also on the **Account** screen).
-Type **`TWINLYHACK`**; $20 of usage (200 credits) lands on your account. Each
-account can redeem it once. It works for the first 500 accounts, through
-December 31, 2026.
+Got a code at your hackathon? Redeem it in **Settings ▸ Developer API ▸ Redeem
+a code** (also on the **Account** screen); its usage lands on your account.
+Each account can redeem a code once. Codes are handed out at the event, never
+posted.
 
 On the free plan you get 5 free prompts a day (each request or job uses one;
-they come back at midnight UTC). After those, your voucher's $20 keeps
+they come back at midnight UTC). After those, your code's usage keeps
 everything working until it's spent.
 
 ## 3. What it costs
