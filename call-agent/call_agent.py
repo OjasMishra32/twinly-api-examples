@@ -44,12 +44,15 @@ def main():
         show(job)
         job = wait_for_job(job, show)
     except KeyboardInterrupt:
-        # Ctrl-C cancels a call that hasn't started yet. Once it's under way,
-        # only you can end it, in Twinly on your Mac (the API answers 409 job_running).
+        # Ctrl-C cancels a call still in line, and asks the Mac to hang up one
+        # that's under way (202, cancel_requested). Twinly before 4.1.5 can't
+        # stop a running call from the API (409 job_running): end it in Twinly.
         note = "Canceled."
         if job:
             try:
-                call("POST", "/jobs/%s/cancel" % job["id"])
+                after = call("POST", "/jobs/%s/cancel" % job["id"])
+                if after.get("cancel_requested"):
+                    note = "Asked your Twinly to hang up. If someone already answered, the minutes still count."
             except TwinlyError as e:
                 if e.code == "job_running":
                     note = "Stopped waiting. The call is already under way: end it in Twinly on your Mac."

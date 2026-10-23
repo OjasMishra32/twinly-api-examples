@@ -36,8 +36,9 @@ node task.js "Make a chart of my calendar this week and save it" --out ./out
 ```
 
 What you'll see: the job id, "working on it", then the answer. Files land in
-`./out` (or `--out`). Ctrl-C cancels a task that hasn't started yet; once
-it's running on your Mac, stop it there in Twinly.
+`./out` (or `--out`). Ctrl-C cancels a task that hasn't started yet, and
+asks your Mac to stop one that's running (Twinly 4.1.5 or later; on an older
+Twinly, stop it there in Twinly).
 
 If something's wrong you get one line saying what to do: Twinly isn't running
 on your Mac, the key is missing a scope, or the account is out of usage

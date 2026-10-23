@@ -91,12 +91,11 @@ class CallAgentTest(unittest.TestCase):
         self.assertIn("Canceled.", err)
         self.assertEqual(self.mock.state()["jobs"][0]["status"], "canceled")
 
-    def test_ctrl_c_on_a_call_under_way_says_to_end_it_on_the_mac(self):
+    def test_ctrl_c_on_a_call_under_way_asks_the_mac_to_hang_up(self):
         self.mock.config({"hold": ["calls.place"]})
         code, err = self.interrupt_once("waiting for you to approve")
         self.assertEqual(code, 130)
-        self.assertIn("end it in Twinly on your Mac", err)
-        self.assertEqual(self.mock.state()["jobs"][0]["status"], "needs_approval")
+        self.assertIn("Asked your Twinly to hang up", err)
 
     def test_offline_mac(self):
         self.mock.config({"mac": "offline"})

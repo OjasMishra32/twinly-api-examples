@@ -492,18 +492,22 @@ paths:
   /jobs/{id}/cancel:
     post:
       tags: [Mac]
-      summary: Cancel a job that is still queued
+      summary: Cancel a queued job, or stop a running task or call
       description: |
-        Only a `queued` job can be canceled (200 with the job; canceling it
-        again is also 200). A job the owner's Mac already has is
-        `409 job_running` (the owner can stop it in Twinly); a finished one is
-        `409 job_finished`. Another key's job, or an unknown id, is
-        `404 job_not_found`.
+        A `queued` job is canceled (200 with the job; canceling it again is
+        also 200). A running (or approval-waiting) task or call is asked to
+        stop: 202 with the job and `cancel_requested: true`; the owner's Mac
+        stops it and the job ends `canceled`, or `done` (and charged) for a
+        call someone already answered. Needs Twinly 4.1.5+ on the Mac; an
+        older Twinly, and a running text or voice note, is `409 job_running`.
+        A finished job is `409 job_finished`. Another key's job, or an unknown
+        id, is `404 job_not_found`.
       operationId: cancelJob
       parameters:
         - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
         "200": { $ref: "#/components/responses/Job" }
+        "202": { $ref: "#/components/responses/Job" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
@@ -550,6 +554,10 @@ components:
             online: { type: boolean }
             last_seen: { type: [string, "null"], format: date-time }
             app_version: { type: [string, "null"] }
+            setup:
+              type: [object, "null"]
+              description: Per endpoint family (messages, messages_read, voice, calls, tasks_on_screen, bots), true when ready or a sentence saying what to set up. Null from Twinly before 4.1.5, or while offline.
+              additionalProperties: { oneOf: [{ type: boolean, const: true }, { type: string }] }
             hint: { type: [string, "null"] }
         can:
           type: object
@@ -600,6 +608,7 @@ components:
         object: { type: string, const: job }
         kind: { type: string, enum: [messages.send, messages.read, calls.place, voice.speak, tasks.run] }
         status: { type: string, enum: [queued, running, needs_approval, done, failed, canceled, expired] }
+        cancel_requested: { type: boolean, description: "True while a running task or call has been asked to stop and the Mac hasn't finished stopping it." }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         result:

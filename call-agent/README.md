@@ -57,7 +57,9 @@ python3 call_agent.py --to "Mom" --goal "Wish her happy birthday" --say "Hi Mom!
 line (otherwise your twin opens from the goal); only its first sentence is
 spoken as the opener, and the rest is added to the goal (up to 1000
 characters in all). Ctrl-C cancels a call that
-hasn't started yet; once it's under way, end it in Twinly on your Mac.
+hasn't started yet, and asks your Mac to hang up one that's under way (Twinly
+4.1.5 or later; on an older Twinly, end it in Twinly on your Mac). A call
+someone already answered still counts its minutes.
 
 Please be decent with it: call people and businesses who'd be fine getting a
 call from you, and for a demo, call your own phone.

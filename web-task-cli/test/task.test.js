@@ -88,7 +88,7 @@ test("a failed task exits 1 with the reason", async () => {
   assert.match(r.stderr, /The task failed: The owner declined this/);
 });
 
-test("Ctrl-C cancels a task still in line, and says so once it's running", async () => {
+test("Ctrl-C cancels a task still in line, and asks the Mac to stop a running one", async () => {
   await mock.config({ mac: "paused" });
   let live = start(["Wait in line"]);
   await eventually(async () => (await mock.state()).jobs.length === 1);
@@ -105,8 +105,8 @@ test("Ctrl-C cancels a task still in line, and says so once it's running", async
   live.child.kill("SIGINT");
   r = await live.done;
   assert.equal(r.code, 130);
-  assert.match(r.stderr, /already running on your Mac: stop it in Twinly/);
-  assert.equal((await mock.state()).jobs[0].status, "needs_approval");
+  assert.match(r.stderr, /Asked your Twinly to stop the task/);
+  await eventually(async () => (await mock.state()).jobs[0].status === "canceled");
 });
 
 test("no key, no prompt", async () => {

@@ -29,12 +29,15 @@ const STATUS = {
 };
 
 let job;
-// Ctrl-C cancels a task that hasn't started yet. Once it's running on your
-// Mac, only you can stop it there (the API answers 409 job_running).
+// Ctrl-C cancels a task still in line, and asks the Mac to stop one that's
+// running (202, cancel_requested). Twinly before 4.1.5 can't stop a running
+// task from the API (409 job_running): stop it in Twinly.
 process.on("SIGINT", async () => {
   let note = "Canceled.";
   if (job) {
-    await twinly("POST", `/jobs/${job.id}/cancel`).catch((err) => {
+    await twinly("POST", `/jobs/${job.id}/cancel`).then((after) => {
+      if (after && after.cancel_requested) note = "Asked your Twinly to stop the task. Anything it already did stays done.";
+    }).catch((err) => {
       note = err.code === "job_running"
         ? "Stopped waiting. The task is already running on your Mac: stop it in Twinly if you want it to stop."
         : `Stopped waiting (${err.message})`;

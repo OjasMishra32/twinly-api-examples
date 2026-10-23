@@ -265,7 +265,7 @@ test("needs_approval holds until the owner decides", async () => {
   assert.equal(j2.error.code, "declined");
 });
 
-test("cancel: only a queued job; a running one is the owner's to stop", async () => {
+test("cancel: a queued job is canceled; a running task is asked to stop", async () => {
   await mock.config({ mac: "paused" });
   const r = await api("POST", "/tasks", { body: { prompt: "do a thing" } });
   const c = await api("POST", `/jobs/${r.json.id}/cancel`);
@@ -276,8 +276,15 @@ test("cancel: only a queued job; a running one is the owner's to stop", async ()
   const held = await api("POST", "/tasks?wait=1", { body: { prompt: "needs a yes" } });
   assert.equal(held.json.status, "needs_approval");
   const c2 = await api("POST", `/jobs/${held.json.id}/cancel`);
-  assert.deepEqual([c2.status, c2.json.error.code], [409, "job_running"]);
-  const stopped = await mock.control(`jobs/${held.json.id}/stop`, {});
+  assert.deepEqual([c2.status, c2.json.status, c2.json.cancel_requested], [202, "needs_approval", true]);
+  const gone = await eventually(async () => {
+    const r = await api("GET", `/jobs/${held.json.id}`);
+    return r.json.status === "canceled" ? r.json : null;
+  });
+  assert.deepEqual([gone.status, gone.error.code, gone.cancel_requested], ["canceled", "canceled", false]);
+
+  const held2 = await api("POST", "/tasks?wait=1", { body: { prompt: "another" } });
+  const stopped = await mock.control(`jobs/${held2.json.id}/stop`, {});
   assert.deepEqual([stopped.status, stopped.error.code], ["canceled", "stopped_by_owner"]);
 
   const d = await api("POST", "/messages", { body: { to: "Mom", text: "hi" } });

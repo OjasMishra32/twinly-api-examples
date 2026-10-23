@@ -10,6 +10,52 @@ https://advktwnedlgnhswpxokg.supabase.co/functions/v1/twinly-api/v1
 Authorization: Bearer twk_live_...
 ```
 
+## What you can build
+
+Each endpoint is one power of the owner's twin. Apps get interesting when you
+chain them: read a chat, think about it, answer in the owner's voice, call
+someone, or hand the whole job to the Mac as a task. Everything below works
+with one key.
+
+| Combine | And you get | Endpoints |
+|---|---|---|
+| read a chat + chat + send | a digest, a summary or a reply drafted from what people actually said | `GET /v1/messages`, `POST /v1/chat/completions`, `POST /v1/messages` |
+| bot command + your code + reply | an `@twinly <command>` bot that works in any iMessage chat, groups included | `bot.command` webhook, your reply (or `POST /v1/messages`) |
+| incoming text + chat + send | an assistant that answers in the chats the owner picked | `message.received` webhook, `POST /v1/chat/completions`, `POST /v1/messages` |
+| image + send | a picture made from a sentence and texted to someone | `POST /v1/images`, `POST /v1/messages` with an attachment |
+| voice + send | a voice note in the owner's cloned voice | `POST /v1/voice/speak`, `POST /v1/messages` with the audio |
+| call + text | a phone call to a business with a goal, then the outcome texted back | `POST /v1/calls`, `POST /v1/messages` |
+| task + JSON | the Mac researches, browses, reads its calendar, mail or files, and returns fields your code can use | `POST /v1/tasks` with `output_schema` |
+| task on a schedule + alert | a watcher: a price, a slot, a page that changes, then a text or a call when it does | your scheduler, `POST /v1/tasks`, `POST /v1/messages` or `POST /v1/calls` |
+| screenshot + next action, in a loop | your own computer-use agent for a screen your code controls (a VM, a Playwright browser, a game) | `POST /v1/computer/next-action` |
+
+Project ideas:
+
+- **Group-chat concierge.** `@twinly poll`, `@twinly weather`, `@twinly split 84 4` in a group chat; your webhook answers in the chat. (`bot.command`)
+- **Morning digest.** Every morning, read the busiest group chat and text the owner three lines: decisions, questions, plans. (`GET /v1/messages`, chat, `POST /v1/messages`)
+- **The booking caller.** Give it a restaurant's number and a goal ("a table for 4 at 7, somewhere quiet if they can"): the twin calls, you get the transcript, and the owner gets a text with the result. (`POST /v1/calls`, `POST /v1/messages`)
+- **Slot sniper.** Check a booking page every 10 minutes with a task that returns `{"open": true, "times": [...]}`, then text or call the owner the moment a slot opens. (`POST /v1/tasks` + `output_schema`)
+- **Price watch.** A task reads a product page and returns the price as JSON; text the owner when it drops. (`POST /v1/tasks`)
+- **Voice postcards.** Draw a picture from a sentence, add a voice note in the owner's voice, text both to a friend. (`POST /v1/images`, `POST /v1/voice/speak`, `POST /v1/messages`)
+- **Follow-up nudger.** Find questions people asked the owner that got no answer this week and list them, with drafts. (`GET /v1/messages`, chat)
+- **RSVP counter.** Text a group a question, read the replies the next day, and tally who's in. (`POST /v1/messages`, `GET /v1/messages`, chat)
+- **Meeting prep.** A task reads tomorrow's calendar and the related email threads and returns a one-page brief as JSON for your UI. (`POST /v1/tasks`)
+- **Read it to me.** Turn any article into a short audio summary in the owner's voice. (`POST /v1/tasks` or chat, `POST /v1/voice/speak`)
+- **Text adventure or trivia in a group chat.** Your server keeps the game state; `@twinly` commands play it. (`bot.command`)
+- **Your own computer-use agent.** Screenshot a VM or a headless browser, ask for the next action, perform it, repeat; benchmark it against a task list. (`POST /v1/computer/next-action`)
+- **Wake-up call.** At 7, the twin calls the owner and reads the day's calendar and the weather in their own voice. (`POST /v1/tasks`, `POST /v1/calls`)
+- **Bill splitter.** `@twinly split 84.50 4 tip 20` in a group chat: your webhook does the math and posts each share back. (`bot.command`)
+
+Notes for coding agents:
+
+- Call `GET /v1/me` first: it says whether the owner's Mac is online, what this key may call, and (Twinly 4.1.5+) what each family of endpoints still needs set up in `mac.setup`.
+- Mac endpoints are jobs that run on the owner's Mac under their approval settings. A held step shows `needs_approval` until they decide. A Mac runs up to two jobs at once, and one call or task at a time.
+- A task only texts, emails or calls someone when its prompt asks for that, and only the person it names. To send something yourself, use `POST /v1/messages`.
+- Calls dial US numbers through the owner's Google Voice and need the Mac's call setup.
+- `POST /v1/computer/next-action` is for screens your code controls; it returns one action and never touches the owner's Mac.
+- Twinly never solves robot checks or types card numbers or Social Security numbers. Plan around both.
+- Test without a key or a Mac against the mock API in the starter projects; it answers like production.
+
 ## 1. Get a key (5 minutes)
 
 1. **Download Twinly** from [twinly.tech](https://twinly.tech), move it to

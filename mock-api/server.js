@@ -289,6 +289,7 @@ export function createMockApi(options = {}) {
       object: "job",
       kind: j.kind,
       status: j.status,
+      cancel_requested: !!j.cancel_requested && (j.status === "running" || j.status === "needs_approval"),
       created_at: iso(j.created_at),
       updated_at: iso(j.updated_at),
       result: j.status === "done" ? j.result : null,
@@ -1154,14 +1155,28 @@ export function createMockApi(options = {}) {
       case "job.cancel": {
         sweep();
         const j = ownJob(entry, jobId);
-        // Only a job still waiting in line can be canceled from the API; once
-        // it's on the owner's Mac, the owner stops it in Twinly.
+        // A queued job is canceled here. A running (or held) task or call is
+        // asked to stop: 202 with cancel_requested, and the fake Mac stops it
+        // a moment later, as Twinly 4.1.5+ does. A running text or voice note
+        // is already on its way.
         if (j.status === "queued") {
           setStatus(j, "canceled", { error: { code: "canceled", message: "Canceled through the API before the owner's Mac picked it up." } });
         }
         if (j.status === "canceled") return send(res, 200, publicJob(j));
         if (j.status === "running" || j.status === "needs_approval") {
-          throw new ApiError(409, "This job is already running on the owner's Mac, so it can't be canceled from the API. The owner can stop it in Twinly.",
+          if (j.kind === "tasks.run" || j.kind === "calls.place") {
+            if (!j.cancel_requested) {
+              j.cancel_requested = true;
+              j.updated_at = now();
+              later(300, () => {
+                if (j.status !== "running" && j.status !== "needs_approval") return;
+                j.cancel_requested = false;
+                setStatus(j, "canceled", { error: { code: "canceled", message: "Stopped through the API. Anything it already did stays done." } });
+              });
+            }
+            return send(res, 202, publicJob(j));
+          }
+          throw new ApiError(409, "This step is already on its way from the owner's Mac (a text or a voice note), so it can't be stopped now.",
             "job_running");
         }
         throw new ApiError(409, `This job already finished (${j.status}).`, "job_finished");
