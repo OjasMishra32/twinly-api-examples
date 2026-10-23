@@ -94,7 +94,7 @@ function seedChats() {
       name: null,
       participants: ["+15555550101"],
       messages: [
-        { from: "+15555550101", text: "Are you eating enough at this hackathon?", at: at(20) },
+        { from: "+15555550101", text: "Are you eating enough this week?", at: at(20) },
         { from: "me", text: "yes mom, there is pizza", at: at(22) },
       ],
     },

@@ -1,4 +1,4 @@
-# Build with Twinly at a hackathon
+# Build with the Twinly API
 
 Twinly is your AI twin on your Mac. The Twinly API lets your code use it:
 text from your own iMessage, read a group chat, make a phone call in your
@@ -92,15 +92,14 @@ into Postman or Insomnia to try every endpoint without writing code.
 Tip: `POST /v1/tasks` takes an `output_schema` (a JSON Schema) and returns the
 answer as `data` in that shape, so your app gets fields instead of a paragraph.
 
-## 2. Redeem your event code
+## 2. Redeem a promo code (optional)
 
-Got a code at your hackathon? Redeem it in **Settings ▸ Developer API ▸ Redeem
+Have a promo code from Twinly? Redeem it in **Settings ▸ Developer API ▸ Redeem
 a code** (also on the **Account** screen); its usage lands on your account.
-Each account can redeem a code once. Codes are handed out at the event, never
-posted.
+Each account can redeem a code once.
 
 On the free plan you get 5 free prompts a day (each request or job uses one;
-they come back at midnight UTC). After those, your code's usage keeps
+they come back at midnight UTC). After those, a promo code's usage keeps
 everything working until it's spent.
 
 ## 3. What it costs
@@ -152,7 +151,7 @@ node mock-api/server.js
 ## Set up your Mac once (10 minutes)
 
 The Mac endpoints use your own Mac, so each needs its piece of Twinly set up
-first. Do these before the hackathon starts, not during your demo:
+first. Do these once, before you build on them:
 
 | to use | set up in Twinly | then check |
 |---|---|---|

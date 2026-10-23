@@ -67,7 +67,7 @@ test("--with reads your chat with one person", async () => {
   assert.match(r.stdout, /Digest of your chat with Mom \(last 2 messages\)/);
   const s = await mock.state();
   assert.deepEqual(s.jobs[0].payload, { with: "Mom", limit: 30 });
-  assert.ok(s.chat_requests[0].messages.at(-1).content.includes("Mom: Are you eating enough at this hackathon?"));
+  assert.ok(s.chat_requests[0].messages.at(-1).content.includes("Mom: Are you eating enough this week?"));
   const both = await run(["--chat", "Hack Squad", "--with", "Mom"]);
   assert.equal(both.code, 2);
 });
